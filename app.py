@@ -1,6 +1,5 @@
 import streamlit as st
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 from anthropic import Anthropic
 from openai import OpenAI
 
@@ -106,7 +105,7 @@ with st.sidebar:
         )
         model_choice = st.selectbox(
             "Model",
-            ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+            ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-pro", "gemini-1.5-flash"],
             index=0
         )
         active_key = st.session_state.api_keys["gemini"].strip()
@@ -159,39 +158,32 @@ if prompt := st.chat_input("Paste a topic, syllabus list, or question..."):
         st.error(f"Please enter your {provider} API Key in the sidebar to proceed.")
         st.stop()
 
-    # Append and render user input
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Stream assistant response
     with st.chat_message("assistant"):
         response_placeholder = st.empty()
         full_response = ""
 
         try:
             if provider == "Google Gemini":
-                client = genai.Client(api_key=active_key)
+                genai.configure(api_key=active_key)
                 
-                contents = []
-                for msg in st.session_state.messages:
-                    role = "user" if msg["role"] == "user" else "model"
-                    contents.append(
-                        types.Content(
-                            role=role,
-                            parts=[types.Part.from_text(text=msg["content"])]
-                        )
-                    )
-                
-                config = types.GenerateContentConfig(
+                model = genai.GenerativeModel(
+                    model_name=model_choice,
                     system_instruction=SYSTEM_PROMPT
                 )
                 
-                response_stream = client.models.generate_content_stream(
-                    model=model_choice,
-                    contents=contents,
-                    config=config
-                )
+                # Format conversation history for google-generativeai
+                gemini_history = []
+                for msg in st.session_state.messages[:-1]:
+                    role = "user" if msg["role"] == "user" else "model"
+                    gemini_history.append({"role": role, "parts": [msg["content"]]})
+                
+                chat = model.start_chat(history=gemini_history)
+                response_stream = chat.send_message(prompt, stream=True)
+                
                 for chunk in response_stream:
                     if chunk.text:
                         full_response += chunk.text
@@ -201,7 +193,6 @@ if prompt := st.chat_input("Paste a topic, syllabus list, or question..."):
             elif provider == "Claude (Anthropic)":
                 client = Anthropic(api_key=active_key)
                 
-                # Format message history for Anthropic (system prompt supplied separately)
                 anthropic_messages = [
                     {"role": msg["role"], "content": msg["content"]}
                     for msg in st.session_state.messages
