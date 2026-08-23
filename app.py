@@ -1,6 +1,7 @@
 import streamlit as st
 from google import genai
 from google.genai import types
+from anthropic import Anthropic
 from openai import OpenAI
 
 # ---------------------------------------------------------
@@ -69,7 +70,7 @@ For each concept/topic covered, include:
 """
 
 # ---------------------------------------------------------
-# Page Config & Layout
+# Page Setup
 # ---------------------------------------------------------
 st.set_page_config(page_title="AI Teaching Assistant", page_icon="🎓", layout="centered")
 
@@ -77,77 +78,101 @@ st.title("🎓 AI Teaching Assistant")
 st.caption("Paste any curriculum topic, syllabus snippet, or technical question.")
 
 # ---------------------------------------------------------
-# Sidebar Configuration (Reads from TOML / Allows Override)
+# Session State Key Store Initialization (Browser Memory Only)
+# ---------------------------------------------------------
+if "api_keys" not in st.session_state:
+    st.session_state.api_keys = {
+        "gemini": "",
+        "anthropic": "",
+        "openai": ""
+    }
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# ---------------------------------------------------------
+# Sidebar Configuration
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("Provider & Model")
-    provider = st.radio("Select Provider", ["Google Gemini", "OpenAI"], index=0)
+    provider = st.selectbox("Provider", ["Google Gemini", "Claude (Anthropic)", "OpenAI"], index=0)
 
     if provider == "Google Gemini":
-        # Supports GEMINI_API_KEY or GOOGLE_API_KEY from secrets.toml
-        default_gemini_key = st.secrets.get("GEMINI_API_KEY", st.secrets.get("GOOGLE_API_KEY", ""))
-        api_key = st.text_input(
+        st.session_state.api_keys["gemini"] = st.text_input(
             "Gemini API Key",
-            value=default_gemini_key,
+            value=st.session_state.api_keys["gemini"],
             type="password",
-            help="Pre-filled from secrets.toml if present, or paste from https://aistudio.google.com/"
+            help="Your key stays purely in session memory and is never logged or saved to disk."
         )
         model_choice = st.selectbox(
             "Model",
             ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
             index=0
         )
-    else:
-        default_openai_key = st.secrets.get("OPENAI_API_KEY", "")
-        api_key = st.text_input(
-            "OpenAI API Key",
-            value=default_openai_key,
+        active_key = st.session_state.api_keys["gemini"].strip()
+
+    elif provider == "Claude (Anthropic)":
+        st.session_state.api_keys["anthropic"] = st.text_input(
+            "Anthropic API Key",
+            value=st.session_state.api_keys["anthropic"],
             type="password",
-            help="Pre-filled from secrets.toml if present, or paste from https://platform.openai.com/"
+            help="Your key stays purely in session memory and is never logged or saved to disk."
+        )
+        model_choice = st.selectbox(
+            "Model",
+            ["claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+            index=0
+        )
+        active_key = st.session_state.api_keys["anthropic"].strip()
+
+    else:  # OpenAI
+        st.session_state.api_keys["openai"] = st.text_input(
+            "OpenAI API Key",
+            value=st.session_state.api_keys["openai"],
+            type="password",
+            help="Your key stays purely in session memory and is never logged or saved to disk."
         )
         model_choice = st.selectbox(
             "Model",
             ["gpt-4o", "gpt-4o-mini"],
             index=0
         )
+        active_key = st.session_state.api_keys["openai"].strip()
 
+    st.markdown("---")
     if st.button("Clear Chat", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
 # ---------------------------------------------------------
-# Session State Initialization
+# Display Chat History
 # ---------------------------------------------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# Display conversation history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
 # ---------------------------------------------------------
-# Chat Input & Response Generation
+# Chat Input & Streaming Inference
 # ---------------------------------------------------------
 if prompt := st.chat_input("Paste a topic, syllabus list, or question..."):
-    if not api_key:
-        st.error(f"Please provide an API Key for {provider} in the text field or via secrets.toml.")
+    if not active_key:
+        st.error(f"Please enter your {provider} API Key in the sidebar to proceed.")
         st.stop()
 
-    # Append & display user prompt
+    # Append and render user input
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Stream assistant response
     with st.chat_message("assistant"):
         response_placeholder = st.empty()
         full_response = ""
 
         try:
             if provider == "Google Gemini":
-                client = genai.Client(api_key=api_key)
+                client = genai.Client(api_key=active_key)
                 
-                # Format conversation history
                 contents = []
                 for msg in st.session_state.messages:
                     role = "user" if msg["role"] == "user" else "model"
@@ -173,8 +198,28 @@ if prompt := st.chat_input("Paste a topic, syllabus list, or question..."):
                         response_placeholder.markdown(full_response + "▌")
                 response_placeholder.markdown(full_response)
 
+            elif provider == "Claude (Anthropic)":
+                client = Anthropic(api_key=active_key)
+                
+                # Format message history for Anthropic (system prompt supplied separately)
+                anthropic_messages = [
+                    {"role": msg["role"], "content": msg["content"]}
+                    for msg in st.session_state.messages
+                ]
+                
+                with client.messages.stream(
+                    model=model_choice,
+                    max_tokens=4096,
+                    system=SYSTEM_PROMPT,
+                    messages=anthropic_messages,
+                ) as stream:
+                    for text in stream.text_stream:
+                        full_response += text
+                        response_placeholder.markdown(full_response + "▌")
+                response_placeholder.markdown(full_response)
+
             else:  # OpenAI
-                client = OpenAI(api_key=api_key)
+                client = OpenAI(api_key=active_key)
                 api_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
                 for msg in st.session_state.messages:
                     api_messages.append({"role": msg["role"], "content": msg["content"]})
@@ -193,4 +238,4 @@ if prompt := st.chat_input("Paste a topic, syllabus list, or question..."):
             st.session_state.messages.append({"role": "assistant", "content": full_response})
 
         except Exception as e:
-            st.error(f"Error communicating with {provider}: {e}")
+            st.error(f"Error from {provider}: {e}")
