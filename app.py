@@ -77,19 +77,20 @@ st.title("🎓 AI Teaching Assistant")
 st.caption("Paste any curriculum topic, syllabus snippet, or technical question.")
 
 # ---------------------------------------------------------
-# Sidebar Configuration
+# Sidebar Configuration (Reads from TOML / Allows Override)
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("Provider & Model")
     provider = st.radio("Select Provider", ["Google Gemini", "OpenAI"], index=0)
 
     if provider == "Google Gemini":
-        secret_key = st.secrets.get("GEMINI_API_KEY", "")
+        # Supports GEMINI_API_KEY or GOOGLE_API_KEY from secrets.toml
+        default_gemini_key = st.secrets.get("GEMINI_API_KEY", st.secrets.get("GOOGLE_API_KEY", ""))
         api_key = st.text_input(
             "Gemini API Key",
-            value=secret_key,
+            value=default_gemini_key,
             type="password",
-            help="Get your key at https://aistudio.google.com/"
+            help="Pre-filled from secrets.toml if present, or paste from https://aistudio.google.com/"
         )
         model_choice = st.selectbox(
             "Model",
@@ -97,12 +98,12 @@ with st.sidebar:
             index=0
         )
     else:
-        secret_key = st.secrets.get("OPENAI_API_KEY", "")
+        default_openai_key = st.secrets.get("OPENAI_API_KEY", "")
         api_key = st.text_input(
             "OpenAI API Key",
-            value=secret_key,
+            value=default_openai_key,
             type="password",
-            help="Get your key at https://platform.openai.com/"
+            help="Pre-filled from secrets.toml if present, or paste from https://platform.openai.com/"
         )
         model_choice = st.selectbox(
             "Model",
@@ -130,7 +131,7 @@ for message in st.session_state.messages:
 # ---------------------------------------------------------
 if prompt := st.chat_input("Paste a topic, syllabus list, or question..."):
     if not api_key:
-        st.error(f"Please provide an API Key for {provider} in the sidebar or via Streamlit Secrets.")
+        st.error(f"Please provide an API Key for {provider} in the text field or via secrets.toml.")
         st.stop()
 
     # Append & display user prompt
@@ -146,7 +147,7 @@ if prompt := st.chat_input("Paste a topic, syllabus list, or question..."):
             if provider == "Google Gemini":
                 client = genai.Client(api_key=api_key)
                 
-                # Convert session history into Gemini Content structures
+                # Format conversation history
                 contents = []
                 for msg in st.session_state.messages:
                     role = "user" if msg["role"] == "user" else "model"
@@ -161,7 +162,6 @@ if prompt := st.chat_input("Paste a topic, syllabus list, or question..."):
                     system_instruction=SYSTEM_PROMPT
                 )
                 
-                # Stream response from Gemini
                 response_stream = client.models.generate_content_stream(
                     model=model_choice,
                     contents=contents,
@@ -194,4 +194,3 @@ if prompt := st.chat_input("Paste a topic, syllabus list, or question..."):
 
         except Exception as e:
             st.error(f"Error communicating with {provider}: {e}")
-            
