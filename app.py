@@ -77,7 +77,7 @@ st.title("🎓 AI Teaching Assistant")
 st.caption("Paste any curriculum topic, syllabus snippet, or technical question.")
 
 # ---------------------------------------------------------
-# Session State Key Store Initialization (Browser Memory Only)
+# Session State Key Store Initialization (In-Memory per Session)
 # ---------------------------------------------------------
 if "api_keys" not in st.session_state:
     st.session_state.api_keys = {
@@ -90,7 +90,7 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # ---------------------------------------------------------
-# Sidebar Configuration
+# Sidebar Configuration & Pricing Reference
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("Provider & Model")
@@ -105,10 +105,29 @@ with st.sidebar:
         )
         model_choice = st.selectbox(
             "Model",
-            ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-pro", "gemini-1.5-flash"],
+            [
+                "gemini-3.1-pro-preview",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-2.0-flash",
+                "gemini-1.5-flash"
+            ],
             index=0
         )
         active_key = st.session_state.api_keys["gemini"].strip()
+
+        with st.expander("📊 Gemini Pricing Reference (per 1M tokens)", expanded=True):
+            st.markdown(
+                """
+| Model | Input | Output |
+| :--- | :--- | :--- |
+| `gemini-3.1-pro-preview` | Free tier / Payg | Free tier / Payg |
+| `gemini-2.5-flash` | $0.075 | $0.30 |
+| `gemini-2.5-pro` | $1.25 | $5.00 |
+| `gemini-2.0-flash` | Free tier / $0.10 | Free tier / $0.40 |
+| `gemini-1.5-flash` | Free tier / $0.075 | Free tier / $0.30 |
+                """
+            )
 
     elif provider == "Claude (Anthropic)":
         st.session_state.api_keys["anthropic"] = st.text_input(
@@ -119,10 +138,25 @@ with st.sidebar:
         )
         model_choice = st.selectbox(
             "Model",
-            ["claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+            [
+                "claude-3-7-sonnet-20250219",
+                "claude-3-5-sonnet-20241022",
+                "claude-3-5-haiku-20241022"
+            ],
             index=0
         )
         active_key = st.session_state.api_keys["anthropic"].strip()
+
+        with st.expander("📊 Claude Pricing Reference (per 1M tokens)", expanded=True):
+            st.markdown(
+                """
+| Model | Input | Output |
+| :--- | :--- | :--- |
+| `claude-3-7-sonnet` | $3.00 | $15.00 |
+| `claude-3-5-sonnet` | $3.00 | $15.00 |
+| `claude-3-5-haiku` | $0.80 | $4.00 |
+                """
+            )
 
     else:  # OpenAI
         st.session_state.api_keys["openai"] = st.text_input(
@@ -133,10 +167,21 @@ with st.sidebar:
         )
         model_choice = st.selectbox(
             "Model",
-            ["gpt-4o", "gpt-4o-mini"],
+            ["gpt-4o", "gpt-4o-mini", "o3-mini"],
             index=0
         )
         active_key = st.session_state.api_keys["openai"].strip()
+
+        with st.expander("📊 OpenAI Pricing Reference (per 1M tokens)", expanded=True):
+            st.markdown(
+                """
+| Model | Input | Output |
+| :--- | :--- | :--- |
+| `gpt-4o` | $2.50 | $10.00 |
+| `gpt-4o-mini` | $0.15 | $0.60 |
+| `o3-mini` | $1.10 | $4.40 |
+                """
+            )
 
     st.markdown("---")
     if st.button("Clear Chat", use_container_width=True):
@@ -175,7 +220,7 @@ if prompt := st.chat_input("Paste a topic, syllabus list, or question..."):
                     system_instruction=SYSTEM_PROMPT
                 )
                 
-                # Format conversation history for google-generativeai
+                # Format conversation history
                 gemini_history = []
                 for msg in st.session_state.messages[:-1]:
                     role = "user" if msg["role"] == "user" else "model"
