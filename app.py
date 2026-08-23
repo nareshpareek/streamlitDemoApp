@@ -1,5 +1,6 @@
-import os
 import streamlit as st
+from google import genai
+from google.genai import types
 from openai import OpenAI
 
 # ---------------------------------------------------------
@@ -76,22 +77,40 @@ st.title("🎓 AI Teaching Assistant")
 st.caption("Paste any curriculum topic, syllabus snippet, or technical question.")
 
 # ---------------------------------------------------------
-# API Key Management
+# Sidebar Configuration
 # ---------------------------------------------------------
-api_key = st.secrets.get("OPENAI_API_KEY", None)
-
 with st.sidebar:
-    st.header("Configuration")
-    if not api_key:
-        api_key = st.text_input("OpenAI API Key", type="password", help="Enter your key or set it in Streamlit Secrets.")
-    
-    model_choice = st.selectbox(
-        "Model",
-        ["gpt-4o", "gpt-4o-mini"],
-        index=0
-    )
-    
-    if st.button("Clear Chat"):
+    st.header("Provider & Model")
+    provider = st.radio("Select Provider", ["Google Gemini", "OpenAI"], index=0)
+
+    if provider == "Google Gemini":
+        secret_key = st.secrets.get("GEMINI_API_KEY", "")
+        api_key = st.text_input(
+            "Gemini API Key",
+            value=secret_key,
+            type="password",
+            help="Get your key at https://aistudio.google.com/"
+        )
+        model_choice = st.selectbox(
+            "Model",
+            ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+            index=0
+        )
+    else:
+        secret_key = st.secrets.get("OPENAI_API_KEY", "")
+        api_key = st.text_input(
+            "OpenAI API Key",
+            value=secret_key,
+            type="password",
+            help="Get your key at https://platform.openai.com/"
+        )
+        model_choice = st.selectbox(
+            "Model",
+            ["gpt-4o", "gpt-4o-mini"],
+            index=0
+        )
+
+    if st.button("Clear Chat", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
@@ -101,7 +120,7 @@ with st.sidebar:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat history
+# Display conversation history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -111,38 +130,68 @@ for message in st.session_state.messages:
 # ---------------------------------------------------------
 if prompt := st.chat_input("Paste a topic, syllabus list, or question..."):
     if not api_key:
-        st.error("Please provide an OpenAI API Key in the sidebar or via Streamlit Secrets.")
+        st.error(f"Please provide an API Key for {provider} in the sidebar or via Streamlit Secrets.")
         st.stop()
 
-    client = OpenAI(api_key=api_key)
-
-    # Display user message
+    # Append & display user prompt
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Format messages payload
-    api_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    for msg in st.session_state.messages:
-        api_messages.append({"role": msg["role"], "content": msg["content"]})
-
-    # Stream assistant response
     with st.chat_message("assistant"):
         response_placeholder = st.empty()
         full_response = ""
-        
+
         try:
-            stream = client.chat.completions.create(
-                model=model_choice,
-                messages=api_messages,
-                stream=True,
-            )
-            for chunk in stream:
-                if chunk.choices[0].delta.content is not None:
-                    full_response += chunk.choices[0].delta.content
-                    response_placeholder.markdown(full_response + "▌")
-            response_placeholder.markdown(full_response)
-            
+            if provider == "Google Gemini":
+                client = genai.Client(api_key=api_key)
+                
+                # Convert session history into Gemini Content structures
+                contents = []
+                for msg in st.session_state.messages:
+                    role = "user" if msg["role"] == "user" else "model"
+                    contents.append(
+                        types.Content(
+                            role=role,
+                            parts=[types.Part.from_text(text=msg["content"])]
+                        )
+                    )
+                
+                config = types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT
+                )
+                
+                # Stream response from Gemini
+                response_stream = client.models.generate_content_stream(
+                    model=model_choice,
+                    contents=contents,
+                    config=config
+                )
+                for chunk in response_stream:
+                    if chunk.text:
+                        full_response += chunk.text
+                        response_placeholder.markdown(full_response + "▌")
+                response_placeholder.markdown(full_response)
+
+            else:  # OpenAI
+                client = OpenAI(api_key=api_key)
+                api_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                for msg in st.session_state.messages:
+                    api_messages.append({"role": msg["role"], "content": msg["content"]})
+
+                stream = client.chat.completions.create(
+                    model=model_choice,
+                    messages=api_messages,
+                    stream=True,
+                )
+                for chunk in stream:
+                    if chunk.choices[0].delta.content is not None:
+                        full_response += chunk.choices[0].delta.content
+                        response_placeholder.markdown(full_response + "▌")
+                response_placeholder.markdown(full_response)
+
             st.session_state.messages.append({"role": "assistant", "content": full_response})
+
         except Exception as e:
-            st.error(f"Error communicating with OpenAI API: {e}")
+            st.error(f"Error communicating with {provider}: {e}")
+            
